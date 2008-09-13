@@ -22,6 +22,8 @@
 #
 #
 #
+# TODO: Instead of the convoluted way to figure out what you have, use the "tag" command in p4 instead ?
+#
 import sys
 import os
 import marshal
@@ -55,10 +57,16 @@ Valid options:
     -y              : actually do work (default is to show only)
     -m              : set comment
     -s <changelist> : only archive specified changelist
+    -f              : use exact filename for compression
+    -d              : open head revision and ignore the source revision for extract operations
+    -o              : overwrite target file, always
+    -r              : use client relative paths instead of depot absolute paths
 """ % VERSION
 
-def p4( command ):
-	commandline = 'p4 %s -G %s' % (COMMON_FLAGS, command)
+def p4( command, commonFlags = '' ):
+	if commonFlags == '':
+		commonFlags = COMMON_FLAGS
+	commandline = 'p4 %s -G %s' % (commonFlags, command)
 	logging.debug( '%s' % commandline )
 	stream = os.popen( commandline, 'rb' )
 	entries = []
@@ -112,7 +120,7 @@ def findFileRevisions():
 	revdiffs = calcRevisionDiff(changefiles, havefiles)
 	return lastchange, revdiffs
 
-def collectOpenedFiles(changelist):
+def collectOpenedFiles(changelist, useClientRelativePaths):
 	result = []
 	
 	changestring = ''
@@ -120,7 +128,11 @@ def collectOpenedFiles(changelist):
 		changestring = ' -c %d ' % changelist
 	
 	for entry in p4( 'opened %s' % changestring ):
-		result.append( (entry['depotFile'], int(entry['rev']), entry['action']) )
+		if useClientRelativePaths:
+			filename = entry['clientFile']
+		else:
+			filename = entry['depotFile']
+		result.append( (filename, int(entry['rev']), entry['action']) )
 	return result
 
 def depotNameToLocal( depotname ):
@@ -301,14 +313,9 @@ def doExtract(filename):
 	
 	return 0
 
-def doCompress(filename, changelist, comment):
-	filename = createFilename(filename)
-	
-	if changelist == 0:
-		basechangelist, difffiles = findFileRevisions()
-	else:
-		basechangelist, difffiles = (0, [])
-	changedfiles = collectOpenedFiles(changelist)	
+def doCompress(filename, changelist, comment, overwriteTarget, useClientRelativePaths):
+	basechangelist, difffiles = (0, [])
+	changedfiles = collectOpenedFiles(changelist, useClientRelativePaths)	
 
 	description = createDescription(basechangelist, difffiles, changedfiles, comment)
 
@@ -317,8 +324,8 @@ def doCompress(filename, changelist, comment):
 	if FAKEIT:
 		return 0
 
-	if os.path.exists(filename):
-		logging.error( 'Refusing to overwrite existing file %s' % filename )
+	if os.path.exists(filename) and not overwriteTarget:
+		logging.error( 'Refusing to overwrite existing file %s (give -o to override)' % filename )
 		return 1
 
 	archive = zipfile.ZipFile(filename, 'w', zipfile.ZIP_DEFLATED)
@@ -336,7 +343,7 @@ def doCompress(filename, changelist, comment):
 
 def main( argv ):
 	try:
-		opts, args = getopt.getopt( argv, 's:m:c:u:p:yqvczh' )
+		opts, args = getopt.getopt( argv, 's:m:c:u:p:yqvczhfdor' )
 	except getopt.GetoptError:
 		print HELP
 		return 1
@@ -346,7 +353,12 @@ def main( argv ):
 	fakeit		= 1
 	comment		= ''
 	changelist  = 0
+	exactFileName = 0
+	openHeadRevision = 0
+	overwriteTarget = 0
+	useClientRelativePaths = 0
 	global COMMON_FLAGS
+	COMMON_FLAGS = ''
 	
 	for o,a in opts:
 		if '-v' == o:
@@ -370,6 +382,14 @@ def main( argv ):
 			comment = a
 		if '-s' == o:
 			changelist = int(a)
+		if '-f' == o:
+			exactFileName = 1
+		if '-d' == o:
+			openHeadRevision = 1
+		if '-o' == o:
+			overwriteTarget = 1
+		if '-r' == o:
+			useClientRelativePaths = 1
 	if len(args) != 1:
 		print 'No filename given!'
 		print HELP
@@ -394,7 +414,9 @@ def main( argv ):
 		if 0 != changelist and comment == '':
 			result = p4('change -o %d' % changelist)[0]
 			comment = result['Description'].rstrip()
-		return doCompress(filename, changelist, comment)
+		if not exactFileName:
+			filename = createFilename(filename)
+		return doCompress(filename, changelist, comment, overwriteTarget, useClientRelativePaths)
 
 if __name__ == '__main__':
 	sys.exit( main(sys.argv[1:] ) )
