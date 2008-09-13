@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 #
+# p4branch.py Jim Tilander 2008 http://www.tilander.org/aurora
+#
 # This scripts allows you to branch your current clientspec to another location 
 # in perforce and keep your work! Yay! It basically follows the instructions here
 # http://kb.perforce.com/UserTasks/CodelinesAndBranching/BranchingWorkInProgress
 # and it also uses the p4shelf.py module I wrote. 
-#
-# p4branch.py Jim Tilander 2008
 #
 # This tool is released "as is" with no guarantees to function nor warranty of any
 # sort. Use it at your own risk. Read more about it (including license) at
@@ -154,12 +154,17 @@ def doit(clientname, newClientPath, doBranching):
 def main( argv ):
 	"""
 p4branch [options] <clientname> <new location in depot>
-		
+
 Options:		
 
 	-v		verbose
 	-s		switch only, don't branch files first
 
+Example new locations must be written in perforce depot format, e.g.
+
+	p4branch myclient  //depot/alpha1/...
+
+2008 Jim Tilander (http://www.tilander.org/aurora)
 	"""
 	try:
 		opts, args = getopt.getopt( argv, 'vsh' )
