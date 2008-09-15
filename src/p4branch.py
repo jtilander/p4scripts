@@ -81,7 +81,7 @@ def branchCurrentView(clientname, newPath):
 	# Delete the temporary client when we're done
 	p4shelf.p4( 'client -d %s' % newclient )
 
-def doit(clientname, newClientPath, doBranching):
+def doit(clientname, newClientPath, doBranching, skipBackups, inplaceOperations):
 	# First check if we can actually have a chance to replace the clientspec...
 	if not checkClientspec(clientname):
 		logging.error( 'Only support single line clientspecs.' )
@@ -92,12 +92,12 @@ def doit(clientname, newClientPath, doBranching):
 	logging.info( 'My root directory is %s' % rootDirectory )
 	
 	# Check if we can backup the root directory later on (really paranoid)
-	counter = 0
-	backupDirectory = '%s%08d.bak' % (rootDirectory, counter)
-	while os.path.isfile(backupDirectory) or os.path.isdir(backupDirectory):
-		counter = counter + 1
+	if not skipBackups: 
+		counter = 0
 		backupDirectory = '%s%08d.bak' % (rootDirectory, counter)
-		
+		while os.path.isfile(backupDirectory) or os.path.isdir(backupDirectory):
+			counter = counter + 1
+			backupDirectory = '%s%08d.bak' % (rootDirectory, counter)
 	
 	# If we've requested on the fly branching, then do it at the very beginning, since this can go wrong, and
 	# if it does, then we want to stop really early...
@@ -118,32 +118,38 @@ def doit(clientname, newClientPath, doBranching):
 	logging.info('Saving currently opened files on this client (going to restore them later at the new location) to %s' % tempfilename)
 	p4shelf.main( ['-r', '-f', '-z', '-y', '-o', '-c', clientname, tempfilename] )
 	
-	try:
-		# Backup this directory (just move it to another location)
-		logging.info('Backing up the current clientspec %s -> %s' % (rootDirectory, backupDirectory))
-		os.rename( rootDirectory, backupDirectory )
-	except WindowsError, e:
-		logging.error( 'There is already a backup directory %s, abort.' % backupDirectory )
-		return 1
+	if not skipBackups:
+		try:
+			# Backup this directory (just move it to another location)
+			logging.info('Backing up the current clientspec %s -> %s' % (rootDirectory, backupDirectory))
+			os.rename( rootDirectory, backupDirectory )
+		except WindowsError, e:
+			logging.error( 'There is already a backup directory %s, abort.' % backupDirectory )
+			return 1
 
 	# Fools perforce into thinking that we have no opened files on this client
 	logging.info( 'Reverting files from local client (but they are already shelved at %s' % tempfilename)
 	unhookfiles()
 	
 	# Tell perforce that we don't have any revisions of any files on this machine.
-	p4shelf.p4( "sync -k //...#none" )
+	if not inplaceOperations:
+		p4shelf.p4( "sync -k //...#none" )
 	
 	# Change the clientspec
 	logging.info( 'Switching current clientspec to the fresh branch' )
 	clientspaceSwitch(clientname, newClientPath)
 	
 	# Create new root
-	os.mkdir( rootDirectory )
+	if not inplaceOperations:
+		os.mkdir( rootDirectory )
 	
 	# Sync to the new data
-	logging.info( 'Syncing to the new branch...' )
-	p4shelf.p4( "sync //...#head" )
-	
+	if inplaceOperations:
+		p4shelf.p4( "sync -k -f //..." )
+	else:
+		logging.info( 'Syncing to the new branch...' )
+		p4shelf.p4( "sync //...#head" )
+
 	# Unshelf the work
 	logging.info( 'Restoring work from old clientspec...' )
 	p4shelf.main( ['-r', '-d', '-y', '-c', clientname, tempfilename] )
@@ -159,6 +165,8 @@ Options:
 
 	-v		verbose
 	-s		switch only, don't branch files first
+	-e		live on the edge, don't backup and do operations 
+			inplace (potentially dangerous, but faster on large repositories)
 
 Example new locations must be written in perforce depot format, e.g.
 
@@ -167,7 +175,7 @@ Example new locations must be written in perforce depot format, e.g.
 2008 Jim Tilander (http://www.tilander.org/aurora)
 	"""
 	try:
-		opts, args = getopt.getopt( argv, 'vsh' )
+		opts, args = getopt.getopt( argv, 'vshe' )
 	except getopt.GetoptError:
 		print 'Error parsing arguments'
 		print main.__doc__
@@ -175,6 +183,8 @@ Example new locations must be written in perforce depot format, e.g.
 
 	verbose = 0
 	doBranching = 1
+	skipBackups = 0
+	inplaceOperations =0
 	for o,a in opts:
 		if '-v' == o:
 			verbose = 1
@@ -183,6 +193,10 @@ Example new locations must be written in perforce depot format, e.g.
 			return 1
 		if '-s' == o:
 			doBranching = 0
+		if '-e' == o:
+			#Living on the edge.
+			skipBackups = 1
+			inplaceOperations =1
 
 	if len(args) != 2:
 		print 'You must give both a clientspec and a target branch path'
@@ -196,7 +210,7 @@ Example new locations must be written in perforce depot format, e.g.
 	else:
 		logging.basicConfig( level=logging.INFO, format=os.path.basename(sys.argv[0]) + ': %(message)s' )
 
-	return doit(clientname, newClientPath, doBranching)
+	return doit(clientname, newClientPath, doBranching, skipBackups, inplaceOperations)
 
 if __name__ == '__main__':
 	sys.exit( main(sys.argv[1:] ) )
