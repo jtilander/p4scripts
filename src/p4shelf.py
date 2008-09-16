@@ -60,7 +60,7 @@ Valid options:
     -f              : use exact filename for compression
     -d              : open head revision and ignore the source revision for extract operations
     -o              : overwrite target file, always
-    -r              : use client relative paths instead of depot absolute paths
+    -r              : use client relative paths instead of depot absolute paths (useful for moving files from different clients)
 """ % VERSION
 
 def p4( command, commonFlags = '' ):
@@ -150,12 +150,22 @@ def depotNameToLocalClient( rootDir, depotName ):
 		return result[1:]
 	return result
 	
+def toClientRelative( sourceClientName, depotname ):
+	# replace the name //sourceClientName/ with //ourclientname/
+	myClientName = getClientName()
+	result = re.sub( '//%s/' % sourceClientName, '//%s/' % myClientName, depotname )
+	return result
+	
 def findSourceDepotName( depotName ):
 	result = p4( 'fstat -Or "%s"' % depotName )[0]
 	
 	try:
 		sourceName = result['resolveBaseFile0']
 		sourceRev = int(result['resolveBaseRev0'])
+		try:
+			sourceRev = int(result['resolveEndFromRev0'])
+		except KeyError:
+			pass
 		return '%s#%d' % (sourceName, sourceRev)
 	except KeyError:
 		return ''
@@ -175,10 +185,12 @@ def createFilename(filename):
 	logging.info( 'Target filename is %s' % result )
 	return result
 
-def createDescription(basechangelist, difffiles, changedfiles, comment):
+def createDescription(basechangelist, difffiles, changedfiles, comment, useClientRelativePaths):
 	description = ''
 
 	description += 'TIME: %s\n' % time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime())
+	if useClientRelativePaths:
+		description += 'CLIENT: %s\n' % getClientName()
 	
 	if '' != comment:
 		description += 'INFO: """%s"""\n' % comment
@@ -195,7 +207,7 @@ def createDescription(basechangelist, difffiles, changedfiles, comment):
 	rootDir = clientRoot()
 	for name, revision, action in changedfiles:
 		sourcePath = ''
-		if action in ['branch', 'add', 'integrate'] :
+		if action in ['branch', 'add', 'integrate', 'edit']:
 			sourcePath = findSourceDepotName(name)
 		
 		choppedName = depotNameToLocalClient(rootDir, depotNameToLocal(name))
@@ -214,13 +226,15 @@ def parseDescriptions(data):
 	openedFiles = []
 	comment = ''
 	time = ''
+	sourceClientName = ''
 	
 	timeRe = re.compile( '^TIME: (.*)' )
 	commentRe = re.compile( '^INFO: """(.*)"""', re.MULTILINE + re.DOTALL )
 	baseRe = re.compile('^BASE:\s+(\d+)')
 	driftRe = re.compile('^DRFT:\s+(\d+)\s+"(.+)"')
 	openRe = re.compile('^OPEN:\s+(\d+)\s+([a-z]+)\s+"(.+)"\s+"(.*)"\s+"(.+)"')
-
+	clientRe = re.compile( '^CLIENT: ([^\s]+)' )
+	
 	m = commentRe.search(data)
 	if m:
 		comment = m.group(1).strip()
@@ -247,6 +261,10 @@ def parseDescriptions(data):
 			driftFiles.append((revision,name))
 			continue
 		
+		m = clientRe.match(description)
+		if m:
+			sourceClientName = m.group(1)
+		
 		m = openRe.match(description)
 		if m:
 			revision = int(m.group(1))
@@ -254,11 +272,17 @@ def parseDescriptions(data):
 			name = m.group(3)
 			sourcePath = m.group(4)
 			chopped = m.group(5)
+			
+			# Now we need to transform both the name and the sourcepath into client relative files.
+			if len(sourceClientName):
+				name = toClientRelative(sourceClientName, name)
+				sourcePath = toClientRelative(sourceClientName, sourcePath)
+
 			if len(sourcePath):
 				logging.info( '%s on %s#%d from %s' % (action, name, revision, sourcePath) )
 			else:
 				logging.info( '%s on %s#%d' % (action, name, revision) )
-			
+
 			openedFiles.append((revision, action, name, sourcePath, chopped))
 			continue
 			
@@ -297,8 +321,9 @@ def doExtract(filename):
 		if len(sourcePath):
 			if action == 'branch':
 				p4( 'integrate %s "%s" "%s"' % (syncOptions, sourcePath, name) )
-			if action == 'add':
+			if action in ['add', 'edit']:
 				p4( 'integrate %s "%s" "%s"' % (syncOptions, sourcePath, name) )
+				p4( 'resolve %s -at "%s"' % (syncOptions, name) )
 				p4( 'edit %s "%s"' % (syncOptions, name) )
 				unpack(archive, chopped, name)
 		else:
@@ -317,7 +342,7 @@ def doCompress(filename, changelist, comment, overwriteTarget, useClientRelative
 	basechangelist, difffiles = (0, [])
 	changedfiles = collectOpenedFiles(changelist, useClientRelativePaths)	
 
-	description = createDescription(basechangelist, difffiles, changedfiles, comment)
+	description = createDescription(basechangelist, difffiles, changedfiles, comment, useClientRelativePaths)
 
 	baseChange, driftFiles, openedFiles, comment, archiveTime = parseDescriptions( description )
 
