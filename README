@@ -1,7 +1,8 @@
 Here is a collection of the perforce scripts I've written and posted before on my webpage.
 
-
 Look inside /src/ for the scripts. I've also placed some old stuff inside /old/, nor really for consumption, but perhaps just serve as examples of what not to do.
+
+There is also an option to bake the scripts into stand alone executable files on windows through py2exe. Simply run the batch command makeexe.cmd and there will be new executables in the bin directory afterwards.
 
 Jim Tilander
 Santa Monica, 2008

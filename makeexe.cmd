@@ -8,10 +8,11 @@ echo.
 setlocal
 	pushd %~dp0
 		
-		rmdir /s /q build > nul 2>&1
 		rmdir /s /q bin > nul 2>&1
 		
 		python setup.py py2exe
-	
+
+		rmdir /s /q build > nul 2>&1
+
 	popd
 endlocal
