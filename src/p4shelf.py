@@ -79,6 +79,7 @@ def p4( command, commonFlags = '' ):
 	code = stream.close()
 	if None != code:
 		raise IOError( "Failed to execute %s: %d" % (commandline, int(code)) )
+	logging.debug( 'result: %s' % (str(entries)) )
 	return entries
 
 def getClientName():
