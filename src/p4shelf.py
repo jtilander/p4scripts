@@ -54,6 +54,10 @@ Valid options:
 """ % VERSION
 
 def p4( command, commonFlags = '' ):
+	"""
+		The heart of the script, this executes any perforce command and then returns the results as
+		a list of dictionaries of the result.
+	"""
 	if commonFlags == '':
 		commonFlags = COMMON_FLAGS
 	commandline = 'p4 %s -G %s' % (commonFlags, command)
@@ -73,6 +77,10 @@ def p4( command, commonFlags = '' ):
 	return entries
 
 def getClientName():
+	"""
+		Tries to figure out the current clientname. If it was given on the command line, it
+		will be returned here, but the fallback will be fixed by perforce.
+	"""
 	entries = p4( 'info' )
 	try:
 		return entries[0]['clientName'].strip()
@@ -172,6 +180,11 @@ def toClientRelative( sourceClientName, depotname ):
 	return result
 	
 def findSourceDepotName( depotName ):
+	"""
+		In the case when we've integrated a file the data could have come from potentially any file
+		in the source tree. This should give us the full depot path of the file we integrated from,
+		and into the "depotName" (which should be opened for edit/integrate at this point).
+	"""
 	result = p4( 'fstat -Or "%s"' % depotName )[0]
 	
 	try:
@@ -190,6 +203,12 @@ def clientRoot():
 	return p4( 'client -o' )[0]['Root'].strip()
 
 def createFilename(filename, comment):
+	"""
+		Tries to make an intelligent filename for the .zip file that we are going to
+		store the changelist and the description in.
+		
+		Returns a string (path).
+	"""
 	timestring = time.strftime( '%Y-%m-%d_%H-%M' )
 	name, ext = os.path.splitext(filename)
 	
@@ -211,6 +230,11 @@ def createFilename(filename, comment):
 	return result
 
 def createDescription(changedfiles, comment, useClientRelativePaths):
+	"""
+		Creates the metadata that we store in the meta file DESCRIPTION_FILENAME in the root of
+		the archive. This should contain enough information to fully restore the changelist 
+		from scratch.
+	"""
 	description = ''
 
 	description += 'TIME: %s\n' % time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime())
@@ -305,7 +329,6 @@ def doExtract(filename):
 	archive = zipfile.ZipFile(filename, 'r')
 	openedFiles, comment, archiveTime = parseDescriptions( archive.read(DESCRIPTION_FILENAME) )
 	
-	# First sync to the base changelist
 	syncOptions = ''
 	if FAKEIT: syncOptions = '-n'
 	
