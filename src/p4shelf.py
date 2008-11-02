@@ -51,6 +51,7 @@ Valid options:
     -d              : open head revision and ignore the source revision for extract operations
     -o              : overwrite target file, always
     -r              : use client relative paths instead of depot absolute paths (useful for moving files from different clients)
+    --archive-desc  : add some of the changelist description to the archive name (create only)
 """ % VERSION
 
 def p4(command):
