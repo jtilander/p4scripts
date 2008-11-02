@@ -53,28 +53,57 @@ Valid options:
     -r              : use client relative paths instead of depot absolute paths (useful for moving files from different clients)
 """ % VERSION
 
-def p4( command, commonFlags = '' ):
+def p4(command):
 	"""
 		The heart of the script, this executes any perforce command and then returns the results as
 		a list of dictionaries of the result.
 	"""
-	if commonFlags == '':
-		commonFlags = COMMON_FLAGS
+	commonFlags = COMMON_FLAGS
 	commandline = 'p4 %s -G %s' % (commonFlags, command)
 	logging.debug( '%s' % commandline )
 	stream = os.popen( commandline, 'rb' )
 	entries = []
 	try:
 		while 1:
-			entry = marshal.load(stream)
+			entry = marshal.load(stream )
 			entries.append(entry)
 	except EOFError:
 		pass
-	code = stream.close()
+	code = stream .close()
 	if None != code:
 		raise IOError( "Failed to execute %s: %d" % (commandline, int(code)) )
 	logging.debug( 'result: %s' % (str(entries)) )
 	return entries
+
+def p4raw(command, input=''):
+	"""
+		Very simple helper for dealing with the forms in perforce.
+	"""
+	commonFlags = COMMON_FLAGS
+	commandline = 'p4 %s %s' % (commonFlags, command)
+	logging.debug( '%s' % commandline )
+	input_, output_ = os.popen2(commandline, 't')
+	input_.write(input)
+	input_.close()
+	output = output_.read()
+	code = output_.close()
+	if None != code:
+		raise IOError("Failed to execute %s: %d \n%s" % (commandline, int(code), output) )
+	return output
+
+def createChangelist(description):
+	"""
+		Creates a new changelist and returns the number.
+	"""
+	logging.debug('Creating new changelist with description %s' % description)
+	form = p4raw('change -o')
+	form = form.replace('<enter description here>', description + '\n\n')
+	result = p4raw('change -i', form)
+	m = re.search(r'Change ([\d]+) created', result )
+	if not m:
+		raise IOError('Failed to create new changelist: %s' % result )
+	logging.info('Created changelist %s' % m.group(1))
+	return int(m.group(1))
 
 def getClientName():
 	"""
@@ -330,28 +359,33 @@ def doExtract(filename):
 	openedFiles, comment, archiveTime = parseDescriptions( archive.read(DESCRIPTION_FILENAME) )
 	
 	syncOptions = ''
-	if FAKEIT: syncOptions = '-n'
+	changelist = ''
+	if FAKEIT: 
+		syncOptions = '-n'
+	else:
+		no = createChangelist(comment)
+		changelist = '-c %d' % no
 	
 	rootDir = clientRoot()
 	for revision, action, name, sourcePath, chopped in openedFiles:
 		p4( 'sync %s "%s#%d"' % (syncOptions, name, revision) )
 		if len(sourcePath):
 			if action == 'branch':
-				p4( 'integrate %s "%s" "%s"' % (syncOptions, sourcePath, name) )
+				p4( 'integrate %s %s "%s" "%s"' % (changelist, syncOptions, sourcePath, name) )
 			if action in ['add', 'edit']:
-				p4( 'integrate %s "%s" "%s"' % (syncOptions, sourcePath, name) )
+				p4( 'integrate %s %s "%s" "%s"' % (changelist, syncOptions, sourcePath, name) )
 				p4( 'resolve %s -at "%s"' % (syncOptions, name) )
-				p4( 'edit %s "%s"' % (syncOptions, name) )
+				p4( 'edit %s %s "%s"' % (changelist, syncOptions, name) )
 				unpack(archive, chopped, name)
 		else:
 			if action == 'edit':
-				p4( 'edit %s "%s"' % (syncOptions, name) )
+				p4( 'edit %s %s "%s"' % (changelist, syncOptions, name) )
 				unpack(archive, chopped, name)
 			if action == 'add':
 				unpack(archive, chopped, name)
-				p4( 'add %s "%s"' % (syncOptions, name) )
+				p4( 'add %s %s "%s"' % (changelist, syncOptions, name) )
 			if action == 'delete':
-				p4( 'delete %s "%s"' % (syncOptions, name) )
+				p4( 'delete %s %s "%s"' % (changelist, syncOptions, name) )
 	
 	return 0
 
