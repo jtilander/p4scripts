@@ -39,7 +39,8 @@ FAKEIT  = 1
 DESCRIPTION_FILENAME = '___p4shelf_information___.txt'
 COMMON_FLAGS = ''
 
-VERSION = 'v0.1'
+VERSION = 'v0.2'
+MAX_CHANGELIST_DESC = 64
 HELP = """
 
 p4shelf %s (c) 2008 Jim Tilander. A tool to ease the minds of paranoid programmers.
@@ -84,7 +85,24 @@ def p4( command, commonFlags = '' ):
 
 def getClientName():
 	entries = p4( 'info' )
-	return entries[0]['clientName'].strip()
+	try:
+		return entries[0]['clientName'].strip()
+	except KeyError:
+		pass
+	
+	# We're on perhaps an older server version?
+	try:
+		pattern = re.compile( 'Client name: (.*)' )
+		for entry in entries:
+			value = entry['data']
+			m = pattern.search(value)
+			if m:
+				clientname = m.group(1)
+				return clientname
+	except KeyError:
+		pass
+		
+	raise IOError('Failed to parse the result out of "p4 info": %s' % str(entries) )
 
 def calcRevisionDiff(changefiles, havefiles):
 	logging.debug( 'Traversing %d changelist files against %d have files' % (len(changefiles), len(havefiles)) )
@@ -175,14 +193,24 @@ def clientRoot():
 	client = getClientName()
 	return p4( 'client -o' )[0]['Root'].strip()
 
-def createFilename(filename):
+def createFilename(filename, comment):
 	timestring = time.strftime( '%Y-%m-%d_%H-%M' )
 	name, ext = os.path.splitext(filename)
 	
 	if '' == ext:
 		ext = '.zip'
 	
-	result = '%s_%s%s' % (name, timestring, ext)
+	# If requested, we want to insert some sanitized version of the beginning of the 
+	# changelist description into the filename so that it is easier to find with a visual
+	# inspection of the directory itself later.
+	if '' != comment:
+		maxLen = MAX_CHANGELIST_DESC
+		if len(comment) > maxLen:
+			comment = comment[:maxLen]
+		comment = re.sub( r'[^a-z^A-Z^0-9]', '_', comment)
+		comment = '_' + comment + '__'
+		
+	result = '%s_%s%s%s' % (name, comment, timestring, ext)
 	logging.info( 'Target filename is %s' % result )
 	return result
 
@@ -353,7 +381,12 @@ def doCompress(filename, changelist, comment, overwriteTarget, useClientRelative
 	if os.path.exists(filename) and not overwriteTarget:
 		logging.error( 'Refusing to overwrite existing file %s (give -o to override)' % filename )
 		return 1
-
+	
+	# Create the path for sure before we create an archive.
+	try:
+		os.makedirs( os.path.dirname(filename) )
+	except WindowsError:
+		pass # Probably already existed.
 	archive = zipfile.ZipFile(filename, 'w', zipfile.ZIP_DEFLATED)
 	archive.writestr(DESCRIPTION_FILENAME, description)
 
@@ -369,20 +402,21 @@ def doCompress(filename, changelist, comment, overwriteTarget, useClientRelative
 
 def main( argv ):
 	try:
-		opts, args = getopt.getopt( argv, 's:m:c:u:p:yqvczhfdor' )
+		opts, args = getopt.getopt( argv, 's:m:c:u:p:yqvczhfdor', ['archive-desc'] )
 	except getopt.GetoptError:
 		print HELP
 		return 1
 	
-	verbose		= 1
-	extract		= 1
-	fakeit		= 1
-	comment		= ''
-	changelist  = 0
+	verbose	= 0
+	extract = 1
+	fakeit = 1
+	comment	= ''
+	changelist = 0
 	exactFileName = 0
 	openHeadRevision = 0
 	overwriteTarget = 0
 	useClientRelativePaths = 0
+	useDescriptiveArchiveNames = 0
 	global COMMON_FLAGS
 	COMMON_FLAGS = ''
 	
@@ -416,6 +450,8 @@ def main( argv ):
 			overwriteTarget = 1
 		if '-r' == o:
 			useClientRelativePaths = 1
+		if '--archive-desc' == o:
+			useDescriptiveArchiveNames = 1
 	if len(args) != 1:
 		print 'No filename given!'
 		print HELP
@@ -441,7 +477,10 @@ def main( argv ):
 			result = p4('change -o %d' % changelist)[0]
 			comment = result['Description'].rstrip()
 		if not exactFileName:
-			filename = createFilename(filename)
+			desc = ''
+			if useDescriptiveArchiveNames:
+				desc = comment
+			filename = createFilename(filename, desc)
 		return doCompress(filename, changelist, comment, overwriteTarget, useClientRelativePaths)
 
 if __name__ == '__main__':
