@@ -351,6 +351,9 @@ def unpack(archive, chopped, depotName):
 	# Some users like to map their depot a little whacky, so we need to lookup the proper name
 	# on this client mapping.
 	clientFile = depotWhere(depotName)
+	clientDir = os.path.dirname(clientFile)
+	if not os.path.isdir(clientDir):
+		os.makedirs(clientDir)
 	stream = open( clientFile, 'wb' )
 	stream.write(data)
 	stream.close()
