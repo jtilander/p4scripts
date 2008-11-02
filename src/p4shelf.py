@@ -13,17 +13,6 @@
 # sort. Use it at your own risk. Read more about it (including license) at
 # http://www.tilander.org/aurora
 #
-#
-# History:
-#
-# 2008-01-26: Initial release.
-# 2008-01-28: Added improved parsing for comments.
-# 2008-01-31: Fixed an bug when backing up files that actually were opened for add.
-#
-#
-#
-# TODO: Instead of the convoluted way to figure out what you have, use the "tag" command in p4 instead ?
-#
 import sys
 import os
 import marshal
@@ -140,6 +129,13 @@ def findFileRevisions():
 	return lastchange, revdiffs
 
 def collectOpenedFiles(changelist, useClientRelativePaths):
+	"""
+		Returns a list of all the opened files. Each entry in the list is a tuple of
+		
+		(filename, base revision, what we did in perforce)
+		
+		This tuple is then stored into the metadata and later acted upon when we estract things.
+	"""
 	result = []
 	
 	changestring = ''
@@ -214,7 +210,7 @@ def createFilename(filename, comment):
 	logging.info( 'Target filename is %s' % result )
 	return result
 
-def createDescription(basechangelist, difffiles, changedfiles, comment, useClientRelativePaths):
+def createDescription(changedfiles, comment, useClientRelativePaths):
 	description = ''
 
 	description += 'TIME: %s\n' % time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime())
@@ -224,13 +220,6 @@ def createDescription(basechangelist, difffiles, changedfiles, comment, useClien
 	if '' != comment:
 		description += 'INFO: """%s"""\n' % comment
 	
-	if 0 != basechangelist:
-		description += 'BASE: %3d\n\n' % basechangelist
-	
-	for name, revision in difffiles:
-		desc = 'DRFT: %3d "%s"\n' % (revision, name)
-		description += desc
-		
 	description += '\n\n'
 	
 	rootDir = clientRoot()
@@ -250,8 +239,6 @@ def parseDescriptions(data):
 	descriptions = map( string.strip, descriptions )
 	descriptions = filter( len, descriptions )
 	
-	baseChange = 0
-	driftFiles = []
 	openedFiles = []
 	comment = ''
 	time = ''
@@ -259,8 +246,6 @@ def parseDescriptions(data):
 	
 	timeRe = re.compile( '^TIME: (.*)' )
 	commentRe = re.compile( '^INFO: """(.*)"""', re.MULTILINE + re.DOTALL )
-	baseRe = re.compile('^BASE:\s+(\d+)')
-	driftRe = re.compile('^DRFT:\s+(\d+)\s+"(.+)"')
 	openRe = re.compile('^OPEN:\s+(\d+)\s+([a-z]+)\s+"(.+)"\s+"(.*)"\s+"(.+)"')
 	clientRe = re.compile( '^CLIENT: ([^\s]+)' )
 	
@@ -274,20 +259,6 @@ def parseDescriptions(data):
 		if m:
 			time = m.group(1)
 			logging.info( 'Archive time = %s' % time )
-			continue
-			
-		m = baseRe.match(description)
-		if m:
-			baseChange = int(m.group(1))
-			logging.info( 'sync //...@%d' % baseChange )
-			continue
-		
-		m = driftRe.match(description)
-		if m:
-			revision = int(m.group(1))
-			name = m.group(2)
-			logging.info( 'sync %s#%d' % (name, revision) )
-			driftFiles.append((revision,name))
 			continue
 		
 		m = clientRe.match(description)
@@ -315,7 +286,7 @@ def parseDescriptions(data):
 			openedFiles.append((revision, action, name, sourcePath, chopped))
 			continue
 			
-	return baseChange, driftFiles, openedFiles, comment, time
+	return openedFiles, comment, time
 	
 	
 def unpack(archive, chopped, depotName):
@@ -332,17 +303,11 @@ def unpack(archive, chopped, depotName):
 	
 def doExtract(filename):
 	archive = zipfile.ZipFile(filename, 'r')
-	baseChange, driftFiles, openedFiles, comment, archiveTime = parseDescriptions( archive.read(DESCRIPTION_FILENAME) )
+	openedFiles, comment, archiveTime = parseDescriptions( archive.read(DESCRIPTION_FILENAME) )
 	
 	# First sync to the base changelist
 	syncOptions = ''
 	if FAKEIT: syncOptions = '-n'
-	if baseChange != 0:
-		p4( 'sync %s //...@%d' % (syncOptions, baseChange) )
-	
-	# Take care of all the exceptions
-	for revision, name in driftFiles:
-		p4( 'sync %s "%s#%d"' % (syncOptions, name, revision) )
 	
 	rootDir = clientRoot()
 	for revision, action, name, sourcePath, chopped in openedFiles:
@@ -368,12 +333,10 @@ def doExtract(filename):
 	return 0
 
 def doCompress(filename, changelist, comment, overwriteTarget, useClientRelativePaths):
-	basechangelist, difffiles = (0, [])
 	changedfiles = collectOpenedFiles(changelist, useClientRelativePaths)	
+	description = createDescription(changedfiles, comment, useClientRelativePaths)
 
-	description = createDescription(basechangelist, difffiles, changedfiles, comment, useClientRelativePaths)
-
-	baseChange, driftFiles, openedFiles, comment, archiveTime = parseDescriptions( description )
+	openedFiles, comment, archiveTime = parseDescriptions( description )
 
 	if FAKEIT:
 		return 0
