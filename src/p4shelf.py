@@ -98,6 +98,7 @@ def createChangelist(description):
 	"""
 	logging.debug('Creating new changelist with description %s' % description)
 	form = p4raw('change -o')
+	description = description.replace('\n', '\n\t')
 	form = form.replace('<enter description here>', description + '\n\n')
 	result = p4raw('change -i', form)
 	m = re.search(r'Change ([\d]+) created', result )
@@ -255,9 +256,14 @@ def createFilename(filename, comment):
 		comment = re.sub( r'[^a-z^A-Z^0-9]', '_', comment)
 		comment = '_' + comment + '__'
 		
-	result = '%s_%s%s%s' % (name, comment, timestring, ext)
-	logging.info( 'Target filename is %s' % result )
-	return result
+	counter = 0
+	while 1:
+		result = '%s_%s%s_%04d%s' % (name, comment, timestring, counter, ext)
+		if not os.path.isfile(result):
+			logging.info( 'Target filename is %s' % result )
+			return result
+		counter += 1
+		
 
 def createDescription(changedfiles, comment, useClientRelativePaths):
 	"""
@@ -277,6 +283,12 @@ def createDescription(changedfiles, comment, useClientRelativePaths):
 	description += '\n\n'
 	
 	rootDir = clientRoot()
+	
+	# Some insane people might have a NULL clientroot, in which case we will have no choice but to do the absolute paths
+	# inside the archive... going to be tricky to extrac
+	if 'null' == rootDir:
+		rootDir = ''
+	logging.info('My client root is: %s' % rootDir )
 	for name, revision, action in changedfiles:
 		sourcePath = ''
 		if action in ['branch', 'add', 'integrate', 'edit']:
@@ -411,7 +423,9 @@ def doCompress(filename, changelist, comment, overwriteTarget, useClientRelative
 		os.makedirs( os.path.dirname(filename) )
 	except WindowsError:
 		pass # Probably already existed.
+	logging.info( 'Now compressing into %s' % filename )
 	archive = zipfile.ZipFile(filename, 'w', zipfile.ZIP_DEFLATED)
+	print description
 	archive.writestr(DESCRIPTION_FILENAME, description)
 
 	for revision, action, name, sourcePath, chopped in openedFiles:
@@ -419,6 +433,7 @@ def doCompress(filename, changelist, comment, overwriteTarget, useClientRelative
 			continue
 		archiveName = chopped
 		localName = depotNameToLocal(name)
+		logging.debug( 'Now compressing %s' % localName )
 		archive.write(localName, archiveName.replace('\\', '/'))
 		
 	archive.close()
